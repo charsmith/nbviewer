@@ -35,6 +35,7 @@ try:
 except ImportError:
     from .client import LoggingSimpleAsyncHTTPClient as HTTPClientClass
 from .github import AsyncGitHubClient
+from .stash import AsyncStashClient
 from .log import log_request
 from .utils import git_info, ipython_info
 
@@ -166,6 +167,7 @@ def main():
     AsyncHTTPClient.configure(HTTPClientClass)
     client = AsyncHTTPClient()
     github_client = AsyncGitHubClient(client)
+    stash_client = AsyncStashClient(client)
 
     # load frontpage sections
     with io.open(options.frontpage, 'r') as f:
@@ -182,6 +184,7 @@ def main():
         jinja2_env=env,
         static_path=static_path,
         client=client,
+        stash_client=stash_client,
         github_client=github_client,
         exporter=exporter,
         config=config,

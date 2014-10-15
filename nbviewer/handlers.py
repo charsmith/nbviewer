@@ -46,7 +46,7 @@ from .utils import (transform_ipynb_uri, quote, response_text, base64_decode,
                     parse_header_links, clean_filename)
 
 date_fmt = "%a, %d %b %Y %H:%M:%S UTC"
-
+stash_hostname = os.environ.get('STASH_HOSTNAME')
 #-----------------------------------------------------------------------------
 # Handler classes
 #-----------------------------------------------------------------------------
@@ -65,6 +65,10 @@ class BaseHandler(web.RequestHandler):
     @property
     def github_client(self):
         return self.settings['github_client']
+
+    @property
+    def stash_client(self):
+        return self.settings['stash_client']
 
     @property
     def config(self):
@@ -747,10 +751,121 @@ class GitHubUserHandler(BaseHandler):
         yield self.cache_and_finish(html)
 
 
+class StashHandler(BaseHandler):
+    """list a projects's stash repos"""
+    @cached
+    @gen.coroutine
+    def get(self, project):
+        repos_url = u"https://{hostname}/rest/api/1.0/projects/{project}/repos/".format(
+            hostname=stash_hostname,
+            project=project
+        )
+        with self.catch_client_error():
+            response = yield self.stash_client.fetch(repos_url)
+
+        repos = json.loads(response_text(response))
+
+        entries = []
+        for repo in repos['values']:
+            entries.append(dict(
+                url=repo['name'],
+                name=repo['name'],
+            ))
+            github_url = u"https://{hostname}/projects/{project}/".format(project=project, hostname=stash_hostname)
+            html = self.render_template("userview.html",
+                entries=entries, github_url=github_url,
+                next_url="", prev_url="",
+            )
+        yield self.cache_and_finish(html)
+
+
+class StashRepoHandler(BaseHandler):
+    """redirect /stash/project/repo to .../tree/master"""
+    def get(self, project, repo):
+        self.redirect("/stash/%s/%s/tree/" % (project, repo))
+
 class GitHubRepoHandler(BaseHandler):
     """redirect /github/user/repo to .../tree/master"""
     def get(self, user, repo):
         self.redirect("/github/%s/%s/tree/master/" % (user, repo))
+
+
+class StashTreeHandler(BaseHandler):
+    """list files in a github repo (like github tree)"""
+    @cached
+    @gen.coroutine
+    def get(self, project, repo, path):
+        if not self.request.uri.endswith('/'):
+            self.redirect(self.request.uri + '/')
+            return
+        path = path.rstrip('/')
+        with self.catch_client_error():
+            response = yield self.stash_client.get_contents(project, repo, path)
+
+        contents = json.loads(response_text(response))
+        if not 'children' in contents:
+            app_log.info("{project}/{repo}/{path} not tree, redirecting to blob",
+                extra=dict(project=project, repo=repo, path=path)
+            )
+            self.redirect(
+                u"/stash/{project}/{repo}/blob/{path}".format(
+                    project=project, repo=repo, path=path,
+                )
+            )
+            return
+
+        base_url = u"/stash/{project}/{repo}/tree".format(
+            project=project, repo=repo,
+        )
+        stash_url = u"https://{hostname}/projects/{project}/repos/{repo}/browse/{path}".format(
+            hostname=stash_hostname,
+            project=project, repo=repo, path=path,
+        )
+
+        breadcrumbs = [{
+            'url' : base_url,
+            'name' : repo,
+        }]
+        breadcrumbs.extend(self.breadcrumbs(path, base_url))
+
+        entries = []
+        dirs = []
+        ipynbs = []
+        others = []
+        for file in contents['children']['values']:
+            e = {}
+            e['name'] = file['path']['name']
+            if file['type'] == 'DIRECTORY':
+                e['url'] = u'/stash/{project}/{repo}/tree/{path}'.format(
+                project=project, repo=repo, path=path +  e['name']
+                )
+                e['url'] = quote(e['url'])
+                e['class'] = 'icon-folder-open'
+                dirs.append(e)
+            elif e['name'].endswith('.ipynb'):
+                e['url'] = u'/stash/{project}/{repo}/blob/{path}'.format(
+                project=project, repo=repo, path=path + '/' + e['name']
+                )
+                e['url'] = quote(e['url'])
+                e['class'] = 'icon-book'
+                ipynbs.append(e)
+            else:
+                # submodules don't have html_url
+                e['url'] = ''
+                e['class'] = 'icon-folder-close'
+                others.append(e)
+
+
+        entries.extend(dirs)
+        entries.extend(ipynbs)
+        entries.extend(others)
+
+        html = self.render_template("treelist.html",
+            tree_type='stash',
+            entries=entries, breadcrumbs=breadcrumbs, stash_url=stash_url,
+            user=project, repo=repo, 
+        )
+        yield self.cache_and_finish(html)
 
 
 class GitHubTreeHandler(BaseHandler):
@@ -909,6 +1024,127 @@ class GitHubBlobHandler(RenderingHandler):
             self.cache_and_finish(filedata)
 
 
+class StashRawHandler(RenderingHandler):
+    """handler for files on stash
+
+    If it's a...
+
+    - notebook, render it
+    - non-notebook file, serve file unmodified
+    - directory, redirect to tree
+    """
+    @cached
+    @gen.coroutine
+    def get(self, project, repo, path):
+        raw_url = u"https://{hostname}/projects/{project}/repos/{repo}/browse/{path}?raw".format(
+            hostname=stash_hostname,
+            project=project, repo=repo, path=quote(path)
+        )
+        blob_url = u"https://{hostname}/projects/{project}/repos/{repo}/browse/{path}".format(
+            hostname=stash_hostname,
+            project=project, repo=repo, path=quote(path),
+        )
+        with self.catch_client_error():
+            response = yield self.stash_client.get_contents(
+                project, repo, path=path
+            )
+        contents = json.loads(response_text(response))
+
+        if 'children' in contents:
+            tree_url = "/stash/{project}/{repo}/tree/{path}/".format(
+                project=project, repo=repo, path=quote(path),
+            )
+            app_log.info("%s is a directory, redirecting to %s", self.request.path, tree_url)
+            self.redirect(tree_url)
+            return
+
+        # fetch file data from the blobs API
+        with self.catch_client_error():
+            response = yield self.stash_client.fetch(raw_url)
+
+        filedata = response_text(response)
+
+        mime, enc = mimetypes.guess_type(path)
+        self.set_header("Content-Type", mime or 'text/plain')
+        self.set_header("Content-Disposition", 'inline; filename="{}"'.format(path.rsplit('/',1)[-1]))
+        self.cache_and_finish(filedata)
+
+class StashBlobHandler(RenderingHandler):
+    """handler for files on stash
+
+    If it's a...
+
+    - notebook, render it
+    - non-notebook file, serve file unmodified
+    - directory, redirect to tree
+    """
+    @cached
+    @gen.coroutine
+    def get(self, project, repo, path):
+        raw_url = u"https://{hostname}/projects/{project}/repos/{repo}/browse/{path}?raw".format(
+            hostname=stash_hostname,
+            project=project, repo=repo, path=quote(path)
+        )
+        raw_download_url = u"/stash/{project}/{repo}/raw/{path}".format(
+            hostname=stash_hostname,
+            project=project, repo=repo, path=quote(path)
+        )
+        blob_url = u"https://{hostname}/projects/{project}/repos/{repo}/browse/{path}".format(
+            hostname=stash_hostname,
+            project=project, repo=repo, path=quote(path),
+        )
+        with self.catch_client_error():
+            response = yield self.stash_client.get_contents(
+                project, repo, path=path
+            )
+        contents = json.loads(response_text(response))
+
+        if 'children' in contents:
+            tree_url = "/stash/{project}/{repo}/tree/{path}/".format(
+                project=project, repo=repo, path=quote(path),
+            )
+            app_log.info("%s is a directory, redirecting to %s", self.request.path, tree_url)
+            self.redirect(tree_url)
+            return
+
+        # fetch file data from the blobs API
+        with self.catch_client_error():
+            response = yield self.stash_client.fetch(raw_url)
+
+        filedata = response_text(response)
+
+        if path.endswith('.ipynb'):
+            dir_path = path.rsplit('/', 1)[0]
+            base_url = "/stash/{project}/{repo}/tree".format(
+                project=project, repo=repo
+            )
+            breadcrumbs = [{
+                'url' : base_url,
+                'name' : repo,
+            }]
+            breadcrumbs.extend(self.breadcrumbs(dir_path, base_url))
+
+            try:
+                # filedata may be bytes, but we need text
+                if isinstance(filedata, bytes):
+                    nbjson = filedata.decode('utf-8')
+                else:
+                    nbjson = filedata
+            except Exception as e:
+                app_log.error("Failed to decode notebook: %s", raw_url, exc_info=True)
+                raise web.HTTPError(400)
+            yield self.finish_notebook(nbjson, raw_download_url,
+                home_url=blob_url,
+                breadcrumbs=breadcrumbs,
+                msg="file from GitHub: %s" % raw_url,
+                public=True
+            )
+        else:
+            mime, enc = mimetypes.guess_type(path)
+            self.set_header("Content-Type", mime or 'text/plain')
+            self.cache_and_finish(filedata)
+
+
 class FilesRedirectHandler(BaseHandler):
     """redirect files URLs without files prefix
 
@@ -980,6 +1216,17 @@ handlers = [
     (r'/url[s]?/raw\.?github(?:usercontent)?\.com/([^\/]+)/([^\/]+)/(.*)', RawGitHubURLHandler),
     (r'/url([s]?)/(.*)', URLHandler),
 
+    (r'/stash/([^\/]+)', AddSlashHandler),
+    (r'/stash/([^\/]+)/', StashHandler),
+    (r'/stash/([^\/]+)/([^\/]+)', AddSlashHandler),
+    (r'/stash/([^\/]+)/([^\/]+)/', StashRepoHandler),
+    (r'/stash/([^\/]+)/([^\/]+)/blob/(.*)/', RemoveSlashHandler),
+    (r'/stash/([^\/]+)/([^\/]+)/blob/(.*)', StashBlobHandler),
+    (r'/stash/([^\/]+)/([^\/]+)/raw/(.*)/', RemoveSlashHandler),
+    (r'/stash/([^\/]+)/([^\/]+)/raw/(.*)', StashRawHandler),
+    (r'/stash/([^\/]+)/([^\/]+)/tree', AddSlashHandler),
+    (r'/stash/([^\/]+)/([^\/]+)/tree/(.*)', StashTreeHandler),
+    
     (r'/github/([^\/]+)', AddSlashHandler),
     (r'/github/([^\/]+)/', GitHubUserHandler),
     (r'/github/([^\/]+)/([^\/]+)', AddSlashHandler),
