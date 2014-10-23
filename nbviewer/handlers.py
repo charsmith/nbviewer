@@ -843,8 +843,13 @@ class StashTreeHandler(BaseHandler):
                 e['class'] = 'icon-folder-open'
                 dirs.append(e)
             elif e['name'].endswith('.ipynb'):
+                blob_path = ''
+                if path:
+                    blob_path = path + '/' + e['name']
+                else:
+                    blob_path = e['name']
                 e['url'] = u'/stash/{project}/{repo}/blob/{path}'.format(
-                project=project, repo=repo, path=path + '/' + e['name']
+                project=project, repo=repo, path=blob_path
                 )
                 e['url'] = quote(e['url'])
                 e['class'] = 'icon-book'
