@@ -60,6 +60,10 @@ STASH_URL_RGX = re.compile(r'^https?://stash.corp.netflix.com/projects/([\w\-]+)
 GITHUB_RAW_URL_RGX = re.compile(r'^https?://raw.?github.com/([\w\-]+)/([^\/]+)/(.*)$')
 STASH_PROJECT_RGX = re.compile(r'^([A-Z_]+)$')
 STASH_REPO_RGX = re.compile(r'^([A-Z_]+)/([^\/]+)$')
+STASH_USER_PROJECT_RGX = re.compile(r'^(~[a-z]+)$')
+STASH_USER_REPO_RGX = re.compile(r'^(~[a-z]+)/([^\/]+)$')
+STASH_OTHER_PROJECT_RGX = re.compile(r'^([a-z]+)$')
+STASH_OTHER_REPO_RGX = re.compile(r'^([a-z]+)/([^\/]+)$')
 DROPBOX_URL_RGX = re.compile(r'^http(s?)://www.dropbox.com/(sh?)/(.+)$')
 
 
@@ -80,6 +84,10 @@ url_rewrite_dict = OrderedDict([
         (GITHUB_RAW_URL_RGX,    u'/github/{0}/{1}/blob/{2}'),
         (STASH_REPO_RGX,        u'/stash/{0}/{1}/tree/'),
         (STASH_PROJECT_RGX,     u'/stash/{0}/'),
+        (STASH_USER_REPO_RGX,        u'/stash/{0}/{1}/tree/'),
+        (STASH_USER_PROJECT_RGX,     u'/stash/{0}/'),
+        (STASH_OTHER_REPO_RGX,        u'/stash/~{0}/{1}/tree/'),
+        (STASH_OTHER_PROJECT_RGX,     u'/stash/~{0}/'),
         (DROPBOX_URL_RGX,       u'/url{0}/dl.dropbox.com/{1}/{2}'),
 ])
 

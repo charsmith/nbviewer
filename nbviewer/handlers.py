@@ -836,8 +836,12 @@ class StashTreeHandler(BaseHandler):
             e = {}
             e['name'] = file['path']['name']
             if file['type'] == 'DIRECTORY':
+                if path:
+                    blob_path = path + '/' + e['name']
+                else:
+                    blob_path = e['name']
                 e['url'] = u'/stash/{project}/{repo}/tree/{path}'.format(
-                project=project, repo=repo, path=path +  e['name']
+                project=project, repo=repo, path=blob_path
                 )
                 e['url'] = quote(e['url'])
                 e['class'] = 'icon-folder-open'
