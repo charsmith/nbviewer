@@ -56,9 +56,10 @@ def url_path_join(*pieces):
 GIST_RGX = re.compile(r'^([a-f0-9]+)/?$')
 GIST_URL_RGX = re.compile(r'^https?://gist.github.com/([^\/]+/)?([a-f0-9]+)/?$')
 GITHUB_URL_RGX = re.compile(r'^https?://github.com/([\w\-]+)/([^\/]+)/(blob|tree)/(.*)$')
+STASH_URL_RGX = re.compile(r'^https?://stash.corp.netflix.com/projects/([\w\-]+)/repos/([^\/]+)/browse/(.*)$')
 GITHUB_RAW_URL_RGX = re.compile(r'^https?://raw.?github.com/([\w\-]+)/([^\/]+)/(.*)$')
-GITHUB_USER_RGX = re.compile(r'^([\w\-]+)$')
-GITHUB_USER_REPO_RGX = re.compile(r'^([\w\-]+)/([^\/]+)$')
+STASH_PROJECT_RGX = re.compile(r'^([A-Z_]+)$')
+STASH_REPO_RGX = re.compile(r'^([A-Z_]+)/([^\/]+)$')
 DROPBOX_URL_RGX = re.compile(r'^http(s?)://www.dropbox.com/(sh?)/(.+)$')
 
 
@@ -75,9 +76,10 @@ url_rewrite_dict = OrderedDict([
         (GIST_RGX,              u'/{0}'),
         (GIST_URL_RGX,          u'/{1}'),
         (GITHUB_URL_RGX,        u'/github/{0}/{1}/{2}/{3}'),
+        (STASH_URL_RGX,         u'/stash/{0}/{1}/blob/{2}'),
         (GITHUB_RAW_URL_RGX,    u'/github/{0}/{1}/blob/{2}'),
-        (GITHUB_USER_REPO_RGX,  u'/github/{0}/{1}/tree/master/'),
-        (GITHUB_USER_RGX,       u'/github/{0}/'),
+        (STASH_REPO_RGX,        u'/stash/{0}/{1}/tree/'),
+        (STASH_PROJECT_RGX,     u'/stash/{0}/'),
         (DROPBOX_URL_RGX,       u'/url{0}/dl.dropbox.com/{1}/{2}'),
 ])
 
