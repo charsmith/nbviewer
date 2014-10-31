@@ -148,4 +148,18 @@
 Rendered <span class='date' data-date='{{date}}' title='{{date}}'>({{date}})</span>
 </p>
 {% endif %}
+
+<script type="text/javascript">
+  var query = window.location.search.substring(1).split('=');
+  if (query) {
+    var arg = query[0];
+    var val = query[1];
+    if (arg === "hide_code" && val == "true") {
+      console.log("Hiding code cells");
+      $('.container').find('.input').hide();
+      $('.container').find('.prompt').hide();
+    }
+  }
+</script>
+
 {% endblock extra_footer %}
